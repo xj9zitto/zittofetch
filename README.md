@@ -72,7 +72,7 @@ assets/screenshots/example2.png
 Clone the repo:
 
 ```bash
-git clone https://github.com/<yourname>/gifzittofetch.git
+git clone https://github.com/xj9zitto/gifzittofetch.git
 cd gifzittofetch
 ```
 
