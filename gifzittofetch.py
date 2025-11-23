@@ -21,6 +21,10 @@ import shutil
 import subprocess
 import sys
 import time
+import termios
+import tty
+import select
+
 
 # Optional imports
 try:
@@ -345,58 +349,151 @@ def build_spec_lines(mods):
             out.append(f"\033[1m{name.capitalize()}:\033[0m {val}")
     return out
 
+def enable_raw_mode():
+    fd = sys.stdin.fileno()
+    global old_settings
+    old_settings = termios.tcgetattr(fd)
+    tty.setcbreak(fd)
+
+def disable_raw_mode():
+    try:
+        termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, old_settings)
+    except:
+        pass
+
+def kbhit():
+    dr, _, _ = select.select([sys.stdin], [], [], 0)
+    return dr != []
+
+def getch():
+    return sys.stdin.read(1)
+
+
+
+
 # ---------------- rendering ----------------
+# ---------------- TERMINAL RAW MODE ----------------
+
+def enable_raw_mode():
+    """Enable raw keyboard input mode."""
+    global old_settings
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
+    tty.setcbreak(fd)
+
+def disable_raw_mode():
+    """Restore terminal to normal mode."""
+    try:
+        termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, old_settings)
+    except:
+        pass
+
+
+# ---------------- RENDERING LOOP ----------------
+
 def render_loop(frames, box_w, box_h, fps, align="left"):
+    """
+    Smooth animation + specs + proper quit handling + partial redraw.
+    """
     idx = 0
     delay = 1 / fps
+    last_refresh = 0
 
-    while True:
-        mods = gather_all_modules()
-        specs = build_spec_lines(mods)
+    # Light modules (refresh every 1s)
+    LIGHT_FIELDS = ["uptime", "localip"]
 
-        frame = frames[idx]
-        frame = frame[:box_h] + [""] * max(0, box_h - len(frame))
-        frame = [pad_ansi(x, box_w, align) for x in frame]
+    # Pre-load heavy modules once
+    mods = gather_all_modules()
+    specs = build_spec_lines(mods)
 
-        max_rows = max(len(frame), len(specs))
+    # ---------------- enable raw keyboard mode once ----------------
+    enable_raw_mode()
 
-        print("\033[H\033[2J", end="")
+    try:
+        while True:
 
-        for i in range(max_rows):
-            left = frame[i] if i < len(frame) else " " * box_w
-            right = specs[i] if i < len(specs) else ""
-            allowed = shutil.get_terminal_size().columns - visible_width(left) - visible_width(SEPARATOR_CHAR)
-            right = truncate_ansi(right, allowed)
-            print(left + SEPARATOR_CHAR + right)
+            # -------- Quit detection --------
+            if kbhit():
+                c = getch().lower()
+                if c == "q":
+                    print("\nExiting gifzittofetch…")
+                    break
 
-        idx = (idx + 1) % len(frames)
-        time.sleep(delay)
+            now = time.time()
+
+            # -------- Refresh lightweight modules every 1s --------
+            if now - last_refresh >= 1:
+                last_refresh = now
+                for name, func in MODULE_FUNCS:
+                    if name in LIGHT_FIELDS:
+                        try:
+                            val = func()
+                        except:
+                            val = None
+                        for i, (n, _) in enumerate(mods):
+                            if n == name:
+                                mods[i] = (name, val)
+                                break
+                specs = build_spec_lines(mods)
+
+            # -------- Prepare frame --------
+            frame = frames[idx]
+            frame = frame[:box_h] + [""] * max(0, box_h - len(frame))
+            frame = [pad_ansi(x, box_w, align) for x in frame]
+
+            max_rows = max(len(frame), len(specs))
+
+            # -------- Fast partial clear (no input lag) --------
+            print("\033[H\033[J", end="")   # home + clear below
+
+            # -------- Draw combined output --------
+            for i in range(max_rows):
+                left = frame[i] if i < len(frame) else " " * box_w
+                right = specs[i] if i < len(specs) else ""
+                term_w = shutil.get_terminal_size().columns
+
+                allowed = term_w - visible_width(left) - visible_width(SEPARATOR_CHAR)
+                right = truncate_ansi(right, allowed)
+
+                print(left + SEPARATOR_CHAR + right)
+
+            # -------- Next frame --------
+            idx = (idx + 1) % len(frames)
+            time.sleep(delay)
+
+    finally:
+        disable_raw_mode()
+
 
 # ---------------- CLI ----------------
-def main():
-    p = argparse.ArgumentParser()
+def parse_args():
+    p = argparse.ArgumentParser(description="gifzittofetch - animated ASCII fetch")
     p.add_argument("--anim-dir", default=DEFAULT_ANIM_DIR)
     p.add_argument("--width", type=int, default=DEFAULT_WIDTH)
     p.add_argument("--height", type=int, default=DEFAULT_HEIGHT)
     p.add_argument("--fps", type=float, default=DEFAULT_FPS)
     p.add_argument("--align", choices=["left", "center"], default="left")
-    p.add_argument("--gen-frames", action="true")
-    p.add_argument("-i", "--input")
-    p.add_argument("-o", "--out", default=DEFAULT_ANIM_DIR)
+    p.add_argument("--gen-frames", action="store_true")
+    p.add_argument("--input", "-i")
+    p.add_argument("--out", "-o", default=DEFAULT_ANIM_DIR)
     p.add_argument("--color", action="store_true")
     p.add_argument("--invert", action="store_true")
-    args = p.parse_args()
+    return p.parse_args()
+
+
+def main():
+    args = parse_args()
 
     if args.gen_frames:
-        if not args.input:
-            print("Missing --input GIF")
-            return
-        n = gen_frames_from_gif(args.input, args.out, args.width, args.height, args.color, args.invert)
-        print(f"Generated {n} frames → {args.out}")
+        n = gen_frames_from_gif(args.input, args.out, args.width, args.height,
+                                color=args.color, invert=args.invert)
+        print(f"Generated {n} frames into {args.out}")
         return
 
     frames = load_frames_from_dir(args.anim_dir)
-    render_loop(frames, args.width, args.height, args.fps, args.align)
+    render_loop(frames, args.width, args.height, args.fps, align=args.align)
+
 
 if __name__ == "__main__":
     main()
+
