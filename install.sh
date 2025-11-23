@@ -1,76 +1,81 @@
 #!/usr/bin/env bash
 
-# ---------------------------------------------------------
-#  gifzittofetch installer
-# ---------------------------------------------------------
-
 set -e
 
-PREFIX="/usr/local/bin"
-SHARE="$HOME/.local/share/gifzitto"
+echo "==> Installing gifzittofetch..."
 
-GREEN="\033[32m"
-YELLOW="\033[33m"
-RESET="\033[0m"
+# -------------------------------
+# Paths
+# -------------------------------
+INSTALL_BIN="/usr/local/bin"
+INSTALL_SHARE="/usr/local/share/gifzittofetch"
+ANIM_DIR="$HOME/.local/share/gifzitto/anim"
 
-echo -e "${GREEN}Installing gifzittofetch...${RESET}"
+# -------------------------------
+# Create required dirs
+# -------------------------------
+echo "==> Creating dirs..."
+sudo mkdir -p "$INSTALL_SHARE"
+mkdir -p "$ANIM_DIR"
 
-# ---------------------------------------------------------
-#  Create share directory
-# ---------------------------------------------------------
+# -------------------------------
+# Install main binaries
+# -------------------------------
+echo "==> Installing scripts..."
 
-mkdir -p "$SHARE/anim"
-
-# ---------------------------------------------------------
-#  Copy main scripts
-# ---------------------------------------------------------
-
-if [[ ! -f gifzittofetch.py ]]; then
-    echo "Error: gifzittofetch.py not found in current directory."
-    exit 1
+# Install gifzittofetch
+if [[ -f "gifzittofetch.py" ]]; then
+    sudo cp gifzittofetch.py "$INSTALL_BIN/gifzittofetch"
+    sudo chmod +x "$INSTALL_BIN/gifzittofetch"
+    echo "✓ Installed gifzittofetch"
+else
+    echo "⚠ gifzittofetch.py not found!"
 fi
 
-if [[ ! -f gif2ascii_clean.py ]]; then
-    echo "Warning: gif2ascii_clean.py not found. Only main fetch tool will install."
+# Install gifzitto-frames tool
+if [[ -f "gifzitto-frames.py" ]]; then
+    sudo cp gifzitto-frames.py "$INSTALL_BIN/gifzitto-frames"
+    sudo chmod +x "$INSTALL_BIN/gifzitto-frames"
+    echo "✓ Installed gifzitto-frames"
+else
+    echo "⚠ gifzitto-frames.py not found (optional)"
 fi
 
-echo "Copying scripts to $PREFIX..."
-
-sudo install -m 755 gifzittofetch.py "$PREFIX/gifzittofetch"
-[[ -f gif2ascii_clean.py ]] && sudo install -m 755 gif2ascii_clean.py "$PREFIX/gifzitto-frames"
-
-
-# ---------------------------------------------------------
-#  Create default animation (optional placeholder)
-# ---------------------------------------------------------
-
-if [[ ! -f "$SHARE/anim/frame_0.txt" ]]; then
-    echo -e "${YELLOW}No animation detected — creating placeholder.${RESET}"
-
-    cat > "$SHARE/anim/frame_0.txt" << EOF
-@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
-@                                          @
-@        gifzittofetch installed!          @
-@                                          @
-@    Run gifzitto-frames to add frames     @
-@                                          @
-@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
-EOF
-
+# -------------------------------
+# Install theme_detect.py
+# -------------------------------
+if [[ -f "theme_detect.py" ]]; then
+    sudo cp theme_detect.py "$INSTALL_SHARE/theme_detect.py"
+    echo "✓ Installed theme_detect.py"
+else
+    echo "⚠ theme_detect.py not found!"
 fi
 
 
-# ---------------------------------------------------------
-#  Success
-# ---------------------------------------------------------
+# -------------------------------
+# Patch PYTHONPATH automatically
+# -------------------------------
+echo "==> Updating PYTHONPATH..."
 
-echo -e "${GREEN}gifzittofetch installation complete!${RESET}"
+PROFILE_FILE="$HOME/.bashrc"
+
+if ! grep -Fxq 'export PYTHONPATH="/usr/local/share/gifzittofetch:$PYTHONPATH"' "$PROFILE_FILE"; then
+    echo 'export PYTHONPATH="/usr/local/share/gifzittofetch:$PYTHONPATH"' >> "$PROFILE_FILE"
+    echo "✓ PYTHONPATH updated in ~/.bashrc"
+else
+    echo "✓ PYTHONPATH already configured"
+fi
+
+# ZSH users
+if [[ -f "$HOME/.zshrc" ]]; then
+    if ! grep -Fxq 'export PYTHONPATH="/usr/local/share/gifzittofetch:$PYTHONPATH"' "$HOME/.zshrc"; then
+        echo 'export PYTHONPATH="/usr/local/share/gifzittofetch:$PYTHONPATH"' >> "$HOME/.zshrc"
+        echo "✓ PYTHONPATH updated in ~/.zshrc"
+    fi
+fi
+
+echo "==> Installation complete!"
 echo ""
-echo "Run it with:"
-echo -e "  ${YELLOW}gifzittofetch${RESET}"
+echo "You may need to restart your terminal or run: source ~/.bashrc"
 echo ""
-echo "Generate frames from a GIF with:"
-echo -e "  ${YELLOW}gifzitto-frames -i my.gif --out ~/.local/share/gifzitto/anim${RESET}"
-echo ""
-echo "Uninstall by running:"
-echo -e "  ${YELLOW}sudo rm /usr/local/bin/gifzittofetch /usr/local/bin/gifzitto-frames${RESET}"
+echo "Try running:  gifzittofetch"
