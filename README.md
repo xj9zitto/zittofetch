@@ -1,0 +1,3 @@
+# gifzittofetch
+
+A modern animated ASCII system fetch tool...
